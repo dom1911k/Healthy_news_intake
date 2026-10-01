@@ -78,6 +78,20 @@ The app therefore only uses Reddit with official API credentials from your own R
 have them, add `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME` and `REDDIT_PASSWORD` as
 secrets, then set `reddit: enabled: true` in `config.yaml`. Without them, the digest uses ResetEra only.
 
+## What the source check found (October 2026)
+
+- **ResetEra:** robots.txt allows reading forums and threads. The forum RSS feeds work, but they're ordered by
+  latest reply, so new threads are found from the forum listing sorted by start date. Reaction counts are hidden
+  from logged-out visitors, so replies are ranked by how often other posters quote them, sampling the first and
+  last page of each thread.
+- **Reddit:** robots.txt disallows automated access, so public feeds aren't used. The official API (your own
+  credentials) is the only route, and it's off by default.
+- **Good news:** Positive News, Reasons to be Cheerful, Fix the News and Good News Network all work. Positive News
+  and Good News Network only include a teaser in their feeds, so the article page is read for the few stories that
+  get selected. The Guardian's "The Upside" feed hasn't published since 2024 and is switched off.
+
+Run **probe** from the Actions tab at any time to check this again.
+
 ## How it works
 
 1. **Fetch** recent threads from the ResetEra forums you list, plus recent articles from the good-news feeds.
