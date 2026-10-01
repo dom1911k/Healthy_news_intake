@@ -144,8 +144,16 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
                        f"sorted by start date: {ordered}")
             for t in sorted(threads, key=lambda t: -(t.replies or 0))[:5]:
                 rep.line(INFO, f"   replies={t.replies} {t.title[:70]}")
-            if not threads:
-                _dump(f"{name} listing", page.text(), "structItem--thread")
+            html = page.text()
+            rep.line(INFO, f"   markup counts: structItem--thread={html.count('structItem--thread')}, "
+                           f"js-threadListItem-={html.count('js-threadListItem-')}, /threads/ links={html.count('href=\"/threads/')}")
+            if len(threads) < 10:
+                marks = [m.start() for m in re.finditer("js-threadListItem-", html)]
+                if len(marks) > 2:
+                    snippet = re.sub(r"\s+", " ", html[marks[2] - 200: marks[2] + 3500])
+                    print(f"[dump] {name} third thread item: {snippet}")
+                else:
+                    _dump(f"{name} listing", html, "structItemContainer-group js-threadList", 3000)
             fresh = [t for t in threads if t.replies is not None]
             if fresh:
                 t = max(fresh, key=lambda t: t.replies)
