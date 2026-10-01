@@ -38,6 +38,8 @@ class ThreadListing:
     title: str
     url: str
     replies: int | None
+    author: str | None = None
+    started: int | None = None  # unix time
 
 
 def parse_thread_list(html: str, base: str) -> list[ThreadListing]:
@@ -47,8 +49,11 @@ def parse_thread_list(html: str, base: str) -> list[ThreadListing]:
         if not m:
             continue
         r = re.search(r"<dt>Replies</dt>\s*<dd>([^<]+)</dd>", chunk)
+        a = re.search(r'data-author="([^"]*)"', chunk)
+        t = re.search(r'structItem-startDate.*?data-time="(\d+)"', chunk, re.S)
         out.append(ThreadListing(unescape(m.group(2)).strip(), base.rstrip("/") + m.group(1),
-                                 parse_count(r.group(1)) if r else None))
+                                 parse_count(r.group(1)) if r else None,
+                                 unescape(a.group(1)) if a else None, int(t.group(1)) if t else None))
     return out
 
 
@@ -151,3 +156,10 @@ def parse_thread_page(html: str) -> ThreadPage:
     parser.feed(html)
     pages = [int(n) for n in re.findall(r'href="[^"]*/page-(\d+)[^"]*"', html)]
     return ThreadPage(parser.posts, max(pages, default=1))
+
+
+def canonical_thread_url(url: str) -> str:
+    """Strip '#post-1', 'unread', 'latest', 'page-N' from a thread URL."""
+    url = url.split("#")[0].split("?")[0]
+    url = re.sub(r"/(unread|latest|page-\d+)/?$", "/", url)
+    return url if url.endswith("/") else url + "/"

@@ -1,0 +1,81 @@
+name: Digest
+
+on:
+  schedule:
+    # GitHub cron is UTC-only. Two triggers cover summer (CEST) and winter (CET);
+    # the app itself checks config.yaml (time, days, timezone) and sends at most one digest per day.
+    - cron: "7 5 * * *"
+    - cron: "7 6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to do"
+        type: choice
+        default: dry-run
+        options:
+          - dry-run   # build a digest and show it, but don't email it or remember what was shown
+          - run       # build and email a digest right now
+          - probe     # check which news sources are reachable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: digest
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore memory of already-seen threads
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: digest-state-${{ github.run_id }}
+          restore-keys: digest-state-
+
+      - name: Run
+        env:
+          MODE: ${{ github.event_name == 'schedule' && 'scheduled' || inputs.mode }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+        run: |
+          case "$MODE" in
+            scheduled) python main.py run --scheduled ;;
+            run)       python main.py run ;;
+            dry-run)   python main.py -v dry-run --force-good-news ;;
+            probe)     python main.py probe ;;
+          esac
+
+      - name: Save memory of already-seen threads
+        if: always() && (github.event_name == 'schedule' || inputs.mode == 'run')
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: digest-state-${{ github.run_id }}
+
+      - name: Attach the digest page to this run
+        if: always() && hashFiles('out/*.html') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest
+          path: out/*.html
+          retention-days: 3

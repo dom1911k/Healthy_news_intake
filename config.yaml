@@ -1,0 +1,65 @@
+# Settings for your digest. Lines starting with # are comments.
+# Edit this file on GitHub (pencil icon) to change anything below.
+
+schedule:
+  timezone: Europe/Berlin
+  time: "07:00"          # digest arrives shortly after this time
+  days: daily            # or a list, e.g. [mon, wed, fri]
+
+lookback_hours: 36       # consider threads started in the last 36 hours (already-seen ones are skipped)
+
+selection:
+  min_relevance: 6       # 0-10; only stories scoring at least this make the digest
+  max_stories: 8         # hard cap; fewer is fine, zero is fine
+
+resetera:
+  enabled: true
+  forums:
+    - name: Gaming Forum
+    # - name: Gaming Hangouts
+  min_replies: 50        # ignore threads with fewer replies
+  listing_pages: 2       # forum pages read for reply counts (each page = one request)
+  comments_per_thread: 10
+
+reddit:
+  enabled: false         # needs REDDIT_* secrets; see README
+  subreddits: [Games, pcgaming]
+  min_score: 300
+  comments_per_thread: 10
+
+good_news:
+  enabled: true
+  frequency: weekly      # weekly | daily
+  max_stories: 3
+  min_relevance: 7
+  sources:
+    positive_news:
+      name: Positive News
+      url: https://www.positive.news/feed/
+    reasons_to_be_cheerful:
+      name: Reasons to be Cheerful
+      url: https://reasonstobecheerful.world/feed/
+    guardian_the_upside:
+      name: The Guardian · The Upside
+      url: https://www.theguardian.com/world/series/the-upside/rss
+    fix_the_news:
+      name: Fix the News
+      url: https://fixthenews.com/feed
+    good_news_network:
+      name: Good News Network
+      url: https://www.goodnewsnetwork.org/feed/
+      min_relevance: 8   # lower-trust source: needs a higher score
+
+delivery:
+  email: true            # sends only if the SMTP_* secrets are set; the HTML file is always written
+  output_dir: out
+
+llm:
+  scoring_model: claude-haiku-4-5-20251001
+  summary_model: claude-sonnet-5-5
+  summary_effort: medium
+
+fetch:
+  min_interval_seconds: 2
+
+state_db: state/digest.sqlite3
