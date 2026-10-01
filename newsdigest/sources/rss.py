@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..feeds import parse_feed
+import re
+
+from ..feeds import parse_feed, strip_html
+from ..fetch import FetchError
 from ..models import Item
 from .base import Source, log
 
@@ -33,3 +36,21 @@ class RSSFeed(Source):
             for e in entries
             if e.published is None or e.published >= since
         ]
+
+    def enrich(self, item: Item) -> None:
+        """Feeds that only carry a teaser: read the article page itself (robots.txt permitting)."""
+        if len(item.body_excerpt) >= 1500:
+            return
+        try:
+            resp = self.fetcher.get(item.url)
+        except FetchError as e:
+            log.info("%s article not fetched (%s); using feed text", self.name, e)
+            return
+        if not resp.ok:
+            return
+        html = resp.text()
+        m = re.search(r"<article\b.*?</article>", html, re.S | re.I)
+        paras = [strip_html(p) for p in re.findall(r"<p\b[^>]*>(.*?)</p>", m.group(0) if m else html, re.S | re.I)]
+        text = "\n".join(p for p in paras if len(p) > 60)
+        if len(text) > len(item.body_excerpt):
+            item.body_excerpt = text[:6000]

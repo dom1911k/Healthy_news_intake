@@ -107,6 +107,6 @@ def build_digest(cfg: dict, interests: dict[str, str], db: DB, fetcher, llm: LLM
         good, nscored = _select(npairs, llm, interests["good_news"], "good_news",
                                 float(gcfg.get("min_relevance", 7)), per_source, int(gcfg.get("max_stories", 3)))
         to_mark += nscored
-        good = _summarize(good, {}, llm.summarize_good_news)
+        good = _summarize(good, {s.id: s for s in nsources}, llm.summarize_good_news)
 
     return Digest(created_at=now, stories=stories, good_news=good, stats=stats), to_mark

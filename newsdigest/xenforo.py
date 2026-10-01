@@ -40,20 +40,22 @@ class ThreadListing:
     replies: int | None
     author: str | None = None
     started: int | None = None  # unix time
+    sticky: bool = False
 
 
 def parse_thread_list(html: str, base: str) -> list[ThreadListing]:
     out = []
     for chunk in re.split(r'(?=<div class="structItem structItem--thread)', html)[1:]:
-        m = re.search(r'<div class="structItem-title">.*?<a href="(/threads/[^"]+?)"[^>]*>([^<]+)</a>', chunk, re.S)
+        m = re.search(r'<div class="structItem-title"[^>]*>.*?<a href="(/threads/[^"]+?)"[^>]*>([^<]+)</a>', chunk, re.S)
         if not m:
             continue
-        r = re.search(r"<dt>Replies</dt>\s*<dd>([^<]+)</dd>", chunk)
+        r = re.search(r"<dt>\s*Replies\s*</dt>\s*<dd>\s*([^<]+?)\s*</dd>", chunk)
         a = re.search(r'data-author="([^"]*)"', chunk)
         t = re.search(r'structItem-startDate.*?data-time="(\d+)"', chunk, re.S)
         out.append(ThreadListing(unescape(m.group(2)).strip(), base.rstrip("/") + m.group(1),
                                  parse_count(r.group(1)) if r else None,
-                                 unescape(a.group(1)) if a else None, int(t.group(1)) if t else None))
+                                 unescape(a.group(1)) if a else None, int(t.group(1)) if t else None,
+                                 "structItem-status--sticky" in chunk))
     return out
 
 
@@ -64,6 +66,7 @@ class Post:
     text: str = ""
     reactions: int = 0
     reaction_text: str = ""
+    quoted: int = 0  # how many posts on the sampled pages quote this one (visible to guests)
 
 
 @dataclass
@@ -154,6 +157,11 @@ class _ThreadParser(HTMLParser):
 def parse_thread_page(html: str) -> ThreadPage:
     parser = _ThreadParser()
     parser.feed(html)
+    quotes: dict[str, int] = {}
+    for pid in re.findall(r'data-source="post:\s*(\d+)"', html):
+        quotes[pid] = quotes.get(pid, 0) + 1
+    for p in parser.posts:
+        p.quoted = quotes.get(p.post_id, 0)
     pages = [int(n) for n in re.findall(r'href="[^"]*/page-(\d+)[^"]*"', html)]
     return ThreadPage(parser.posts, max(pages, default=1))
 

@@ -42,7 +42,8 @@ Favour substantive, measurable progress: health, science, climate and energy, po
 conservation, poverty and development - ideally with numbers, scale, or evidence behind it.
 Score 0-3 for: celebrity charity, viral animal rescues, feel-good human-interest anecdotes, "one weird
 trick" science hype, a single small or early study presented as a breakthrough, promotional content,
-or listicles/roundups with no single story. Be strict: most items should score below 6.
+or listicles with no real story. A newsletter issue that rounds up several stories (e.g. Fix the News)
+should be scored on its single strongest item. Be strict: most items should score below 6.
 """,
 }
 
@@ -108,6 +109,9 @@ GAMING_SUMMARY_SCHEMA = {
 GOOD_NEWS_SUMMARY_SYSTEM = f"""You write one entry of a weekly "Good news" section from a news article.
 
 {UNTRUSTED}
+
+If the article is a roundup of several stories, pick the single most substantive, best-evidenced item
+and write about that item only.
 
 Return JSON with:
 - headline: a plain, descriptive headline in your own words, max ~12 words.
@@ -245,7 +249,7 @@ class LLM:
         parts = []
         for it in story.items:
             comments = "\n".join(
-                f"- ({c.score if c.score is not None else '?'} reactions/upvotes) {c.text}" for c in it.top_comments
+                f"- (engagement {c.score if c.score is not None else '?'}) {c.text}" for c in it.top_comments
             ) or "(no replies sampled)"
             parts.append(
                 f"<thread source=\"{it.source}\" replies=\"{it.reply_count}\">\n"

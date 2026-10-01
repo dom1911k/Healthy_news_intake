@@ -39,44 +39,50 @@ class ResetEra(Source):
         return out
 
     def fetch(self, since: datetime) -> list[Item]:
+        """New threads (by start date) from each forum, newest first, paging back until `since`.
+
+        The forum RSS is ordered by last reply and its dates are last-reply dates, so it is only
+        used to borrow opening-post excerpts; discovery and start dates come from the listing.
+        """
+        since_ts = since.timestamp()
         items: dict[str, Item] = {}
         for name, forum_url in self._forum_urls():
             source = f"ResetEra · {name}"
-            # 1) RSS: titles, authors, creation dates, opening-post text, reply counts
+            excerpts: dict[str, str] = {}
             try:
                 resp = self.fetcher.get(forum_url + "index.rss")
-                entries = parse_feed(resp.body).entries if resp.ok else []
-                if not resp.ok:
-                    log.warning("ResetEra RSS %s -> HTTP %s", forum_url, resp.status)
-            except Exception as e:  # noqa: BLE001 - one broken feed must not kill the digest
-                log.warning("ResetEra RSS %s failed: %s", forum_url, e)
-                entries = []
-            for e in entries:
-                url = canonical_thread_url(e.link)
-                items[url] = Item(source=source, title=e.title, url=url, author=e.author,
-                                  created_at=e.published, score=None, reply_count=e.comments,
-                                  body_excerpt=(e.content or e.summary)[:2500], source_id=self.id)
-            # 2) Listing pages: reply counts for more threads than the RSS carries
-            for page in range(1, int(self.cfg.get("listing_pages", 2)) + 1):
-                url = forum_url + (f"page-{page}" if page > 1 else "")
+                if resp.ok:
+                    excerpts = {canonical_thread_url(e.link): (e.content or e.summary)
+                                for e in parse_feed(resp.body).entries}
+            except Exception as e:  # noqa: BLE001 - excerpts are a nice-to-have
+                log.info("ResetEra RSS %s unavailable: %s", forum_url, e)
+
+            for page in range(1, int(self.cfg.get("max_listing_pages", 10)) + 1):
+                url = forum_url + (f"page-{page}" if page > 1 else "") + "?order=post_date&direction=desc"
                 try:
                     resp = self.fetcher.get(url)
                 except FetchError as e:
                     log.warning("ResetEra listing %s failed: %s", url, e)
                     break
                 if not resp.ok:
+                    log.warning("ResetEra listing %s -> HTTP %s", url, resp.status)
                     break
-                for t in parse_thread_list(resp.text(), BASE):
+                threads = [t for t in parse_thread_list(resp.text(), BASE) if not t.sticky and t.started]
+                if not threads:
+                    if page == 1:
+                        log.warning("ResetEra listing %s: no threads parsed (page layout changed?)", url)
+                    break
+                for t in threads:
+                    if t.started < since_ts:
+                        continue
                     turl = canonical_thread_url(t.url)
-                    created = datetime.fromtimestamp(t.started, timezone.utc) if t.started else None
-                    if turl in items:
-                        if t.replies is not None:
-                            items[turl].reply_count = t.replies
-                    else:
-                        items[turl] = Item(source=source, title=t.title, url=turl, author=t.author,
-                                           created_at=created, score=None, reply_count=t.replies,
-                                           body_excerpt="", source_id=self.id)
-        return [i for i in items.values() if i.created_at is None or i.created_at >= since]
+                    items.setdefault(turl, Item(
+                        source=source, title=t.title, url=turl, author=t.author,
+                        created_at=datetime.fromtimestamp(t.started, timezone.utc), score=None,
+                        reply_count=t.replies, body_excerpt=excerpts.get(turl, "")[:2500], source_id=self.id))
+                if min(t.started for t in threads) < since_ts:
+                    break  # reached threads older than the window
+        return list(items.values())
 
     def passes_engagement(self, item: Item) -> bool:
         return (item.reply_count or 0) >= int(self.cfg.get("min_replies", 50))
@@ -106,6 +112,8 @@ class ResetEra(Source):
         if op.text:
             item.body_excerpt = op.text[:2500]
         item.score = op.reactions
-        replies = [p for p in replies if p.text.strip()]
-        ranked = sorted(replies, key=lambda p: p.reactions, reverse=True)
-        item.top_comments = [Comment(text=p.text[:700], score=p.reactions, author=p.author) for p in ranked[:n]]
+        # Rank replies by reactions, plus quotes by other posters (reactions may be hidden from guests).
+        replies = [p for p in replies if len(p.text.strip()) >= 25]
+        ranked = sorted(replies, key=lambda p: p.reactions + 3 * p.quoted, reverse=True)
+        item.top_comments = [Comment(text=p.text[:700], score=p.reactions + 3 * p.quoted, author=p.author)
+                             for p in ranked[:n]]

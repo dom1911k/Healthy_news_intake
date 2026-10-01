@@ -129,26 +129,27 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
                 )
                 for e in sorted(feed.entries, key=lambda e: e.comments or 0, reverse=True)[:5]:
                     rep.line(INFO, f"   replies={e.comments} {_ago(e.published):>10} {e.title[:70]}")
-                news = [e for e in with_counts if "|OT" not in e.title and "Thread" not in e.title]
-                if news:
-                    top = max(news, key=lambda e: e.comments)
-                    if best_thread is None or top.comments > best_thread[1]:
-                        best_thread = (top.link, top.comments, top.title)
 
-        # Thread listing page (reply counts without RSS), and server-side sort by replies
-        for suffix, label in [("", "listing"), ("?order=reply_count&direction=desc", "listing sorted by replies")]:
-            page = _get(f, rep, forum.url + suffix)
-            if page:
-                threads = parse_thread_list(page.text(), ERA)
-                counted = [t for t in threads if t.replies is not None]
-                if not counted and not suffix:
-                    _dump(f"{name} listing", page.text(), "structItem--thread")
-                    _dump(f"{name} listing", page.text(), "/threads/", 1500)
-                rep.result(f"resetera:{name}:{label}", OK if counted else WARN,
-                           f"{label}: {len(threads)} threads parsed, {len(counted)} with reply counts; top: "
-                           + "; ".join(f"{t.replies} {t.title[:40]}" for t in threads[:3]))
-                if counted and best_thread is None:
-                    t = max(counted, key=lambda t: t.replies)
+        # Listing sorted by thread start date: discovery of new threads + reply counts + start dates
+        page = _get(f, rep, forum.url + "?order=post_date&direction=desc")
+        if page:
+            threads = [t for t in parse_thread_list(page.text(), ERA) if not t.sticky]
+            starts = [t.started for t in threads if t.started]
+            ordered = starts == sorted(starts, reverse=True) and len(starts) > 1
+            span = (f"{_ago(datetime.fromtimestamp(max(starts), timezone.utc))} .. "
+                    f"{_ago(datetime.fromtimestamp(min(starts), timezone.utc))}") if starts else "?"
+            rep.result(f"resetera:{name}:listing", OK if ordered else WARN,
+                       f"newest-first listing: {len(threads)} threads/page, started {span}, "
+                       f"{sum(t.replies is not None for t in threads)} with reply counts, "
+                       f"sorted by start date: {ordered}")
+            for t in sorted(threads, key=lambda t: -(t.replies or 0))[:5]:
+                rep.line(INFO, f"   replies={t.replies} {t.title[:70]}")
+            if not threads:
+                _dump(f"{name} listing", page.text(), "structItem--thread")
+            fresh = [t for t in threads if t.replies is not None]
+            if fresh:
+                t = max(fresh, key=lambda t: t.replies)
+                if best_thread is None or t.replies > best_thread[1]:
                     best_thread = (t.url, t.replies, t.title)
 
     if best_thread is None:
@@ -167,17 +168,19 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
         return
     page1 = parse_thread_page(p1.text())
     reacted = [p for p in page1.posts if p.reactions]
+    quoted = [p for p in page1.posts if p.quoted]
+    rep.line(INFO, f"   {len(quoted)} posts on page 1 are quoted by others")
     if not reacted:
-        _dump("thread page", p1.text(), "reaction", 3000)
-        _dump("thread page", p1.text(), "<article", 1500)
+        _dump("thread page", p1.text(), "reactionsBar js-reactionsList is-active", 1500)
+        _dump("thread page", p1.text(), "reactionsBar-link", 800)
     rep.result("resetera:thread:page1", OK if page1.posts else FAIL,
                f"page 1: {len(page1.posts)} posts parsed, {len(reacted)} with reaction counts, "
                f"last page = {page1.last_page}")
     if page1.posts:
         op = page1.posts[0]
         rep.line(INFO, f"   OP by {op.author}: {op.text[:160]!r}")
-    for p in sorted(page1.posts[1:], key=lambda p: p.reactions, reverse=True)[:3]:
-        rep.line(INFO, f"   +{p.reactions} ({p.reaction_text[:50]!r}) {p.author}: {p.text[:110]!r}")
+    for p in sorted(page1.posts[1:], key=lambda p: p.reactions + 3 * p.quoted, reverse=True)[:3]:
+        rep.line(INFO, f"   +{p.reactions} q{p.quoted} ({p.reaction_text[:50]!r}) {p.author}: {p.text[:110]!r}")
 
     sorted_page = _get(f, rep, url + "?order=reaction_score")
     if sorted_page:

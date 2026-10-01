@@ -18,7 +18,7 @@ resetera:
     - name: Gaming Forum
     # - name: Gaming Hangouts
   min_replies: 50        # ignore threads with fewer replies
-  listing_pages: 2       # forum pages read for reply counts (each page = one request)
+  max_listing_pages: 10  # forum pages read (newest threads first) until the lookback window is covered
   comments_per_thread: 10
 
 reddit:
@@ -42,6 +42,7 @@ good_news:
     guardian_the_upside:
       name: The Guardian · The Upside
       url: https://www.theguardian.com/world/series/the-upside/rss
+      enabled: false     # checked Oct 2026: this feed has had no new articles since 2024
     fix_the_news:
       name: Fix the News
       url: https://fixthenews.com/feed
