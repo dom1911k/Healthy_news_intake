@@ -45,8 +45,9 @@ class ThreadListing:
 
 def parse_thread_list(html: str, base: str) -> list[ThreadListing]:
     out = []
-    # Class attributes can contain line breaks, so match whitespace loosely.
-    for chunk in re.split(r'(?=<div class="structItem\s+structItem--thread)', html)[1:]:
+    # ResetEra's markup has line breaks inside tags and attributes; normalise whitespace first.
+    html = re.sub(r"\s+", " ", html)
+    for chunk in re.split(r'(?=<div class=" ?structItem structItem--thread)', html)[1:]:
         m = re.search(r'<div class="structItem-title"[^>]*>.*?<a href="(/threads/[^"]+?)"[^>]*>([^<]+)</a>', chunk, re.S)
         if not m:
             continue
