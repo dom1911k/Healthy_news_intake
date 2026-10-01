@@ -147,17 +147,6 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
             html = page.text()
             rep.line(INFO, f"   markup counts: structItem--thread={html.count('structItem--thread')}, "
                            f"js-threadListItem-={html.count('js-threadListItem-')}, /threads/ links={html.count('href=\"/threads/')}")
-            if len(threads) < 10:
-                chunks = re.split(r'(?=<div class="structItem structItem--thread)', html)[1:]
-                for n, ch in enumerate(chunks[:45]):
-                    cls = re.match(r'<div class="([^"]*)"', ch).group(1)
-                    title = re.search(r'<div class="structItem-title"[^>]*>.*?<a href="(/threads/[^"]+?)"[^>]*>([^<]+)</a>', ch, re.S)
-                    t = re.search(r'structItem-startDate.*?data-time="(\d+)"', ch, re.S)
-                    print(f"[item {n}] len={len(ch)} sticky={'structItem-status--sticky' in ch} "
-                          f"started={t.group(1) if t else None} title={title.group(2)[:40] if title else None!r} cls={cls[:90]}")
-                if len(chunks) > 5:
-                    nonsticky = next((c for c in chunks if 'structItem-status--sticky' not in c), chunks[-1])
-                    print("[dump] first non-sticky item:", re.sub(r"\s+", " ", nonsticky[:2500]))
             fresh = [t for t in threads if t.replies is not None]
             if fresh:
                 t = max(fresh, key=lambda t: t.replies)
@@ -210,6 +199,28 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
             lp = parse_thread_page(last.text())
             rep.result("resetera:thread:lastpage", OK if lp.posts else WARN,
                        f"last page: {len(lp.posts)} posts, {sum(1 for p in lp.posts if p.reactions)} with reactions")
+
+
+def probe_resetera_adapter(f: Fetcher, rep: Report, forum_names: list[str]):
+    """Run the real ResetEra adapter the way the digest does."""
+    from .sources.resetera import ResetEra
+    rep.section("ResetEra adapter (as used by the digest)")
+    src = ResetEra({"forums": [{"name": n} for n in forum_names], "min_replies": 50}, f)
+    since = datetime.now(timezone.utc) - timedelta(hours=36)
+    items = src.fetch(since)
+    engaged = [i for i in items if src.passes_engagement(i)]
+    rep.result("resetera:adapter", OK if items else FAIL,
+               f"{len(items)} threads started in the last 36h, {len(engaged)} with >= 50 replies")
+    for i in sorted(engaged, key=lambda i: -(i.reply_count or 0))[:12]:
+        rep.line(INFO, f"   replies={i.reply_count:>5} {_ago(i.created_at):>8} {i.title[:80]}")
+    if engaged:
+        top = max(engaged, key=lambda i: i.reply_count or 0)
+        src.enrich(top)
+        rep.result("resetera:enrich", OK if top.top_comments else WARN,
+                   f"'{top.title[:50]}': opening post {len(top.body_excerpt)} chars, "
+                   f"{len(top.top_comments)} top replies sampled")
+        for c in top.top_comments[:3]:
+            rep.line(INFO, f"   [{c.score}] {c.text[:120]!r}")
 
 
 # --------------------------------------------------------------------------- Reddit
@@ -332,6 +343,7 @@ def run_probe(era_forums: list[str] | None = None, subreddits: list[str] | None 
     print(f"User-Agent: {f.user_agent}\nmin interval {f.min_interval}s per host, cache {f.cache_ttl:.0f}s in {f.cache_dir}")
     if not only or "resetera" in only:
         probe_resetera(f, rep, era_forums or DEFAULT_ERA_FORUMS)
+        probe_resetera_adapter(f, rep, era_forums or ["Gaming Forum"])
     if not only or "reddit" in only:
         probe_reddit(f, rep, subreddits or DEFAULT_SUBREDDITS)
     if not only or "goodnews" in only:
