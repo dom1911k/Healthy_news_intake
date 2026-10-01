@@ -148,12 +148,16 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
             rep.line(INFO, f"   markup counts: structItem--thread={html.count('structItem--thread')}, "
                            f"js-threadListItem-={html.count('js-threadListItem-')}, /threads/ links={html.count('href=\"/threads/')}")
             if len(threads) < 10:
-                marks = [m.start() for m in re.finditer("js-threadListItem-", html)]
-                if len(marks) > 2:
-                    snippet = re.sub(r"\s+", " ", html[marks[2] - 200: marks[2] + 3500])
-                    print(f"[dump] {name} third thread item: {snippet}")
-                else:
-                    _dump(f"{name} listing", html, "structItemContainer-group js-threadList", 3000)
+                chunks = re.split(r'(?=<div class="structItem structItem--thread)', html)[1:]
+                for n, ch in enumerate(chunks[:45]):
+                    cls = re.match(r'<div class="([^"]*)"', ch).group(1)
+                    title = re.search(r'<div class="structItem-title"[^>]*>.*?<a href="(/threads/[^"]+?)"[^>]*>([^<]+)</a>', ch, re.S)
+                    t = re.search(r'structItem-startDate.*?data-time="(\d+)"', ch, re.S)
+                    print(f"[item {n}] len={len(ch)} sticky={'structItem-status--sticky' in ch} "
+                          f"started={t.group(1) if t else None} title={title.group(2)[:40] if title else None!r} cls={cls[:90]}")
+                if len(chunks) > 5:
+                    nonsticky = next((c for c in chunks if 'structItem-status--sticky' not in c), chunks[-1])
+                    print("[dump] first non-sticky item:", re.sub(r"\s+", " ", nonsticky[:2500]))
             fresh = [t for t in threads if t.replies is not None]
             if fresh:
                 t = max(fresh, key=lambda t: t.replies)
