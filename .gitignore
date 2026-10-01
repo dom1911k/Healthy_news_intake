@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.cache/
+*.sqlite3
+out/
+.env

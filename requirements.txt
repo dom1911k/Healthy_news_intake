@@ -1,0 +1,2 @@
+# Step 0 (probe) uses only the standard library.
+# Pipeline dependencies are added in later steps (anthropic, jinja2, pyyaml).
