@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
@@ -21,7 +22,8 @@ DEFAULT_SUBREDDITS = ["Games", "pcgaming"]
 GOOD_NEWS_CANDIDATES = {
     "positive_news": ["https://www.positive.news/feed/"],
     "reasons_to_be_cheerful": ["https://reasonstobecheerful.world/feed/"],
-    "guardian_the_upside": [
+    "guardian_the_upside": [  # series feed stopped updating in 2024
+
         "https://www.theguardian.com/world/series/the-upside/rss",
         "https://www.theguardian.com/world/the-upside/rss",
     ],
@@ -52,6 +54,17 @@ def _ago(d: datetime | None) -> str:
         return "?"
     h = (datetime.now(timezone.utc) - d).total_seconds() / 3600
     return f"{h:.1f}h ago" if h < 48 else f"{h / 24:.1f}d ago"
+
+
+def _dump(label: str, html: str, needle: str, n: int = 2500):
+    """Print a whitespace-collapsed snippet around `needle`, for fixing parsers against real markup."""
+    i = html.find(needle)
+    if i < 0:
+        snippet = re.sub(r"\s+", " ", html[:600])
+        print(f"[dump] {label}: {needle!r} not found; page starts: {snippet}")
+        return
+    snippet = re.sub(r"\s+", " ", html[max(0, i - 300): i + n])
+    print(f"[dump] {label} around {needle!r}: {snippet}")
 
 
 def _get(f: Fetcher, rep: Report, url: str, **kw):
@@ -116,8 +129,9 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
                 )
                 for e in sorted(feed.entries, key=lambda e: e.comments or 0, reverse=True)[:5]:
                     rep.line(INFO, f"   replies={e.comments} {_ago(e.published):>10} {e.title[:70]}")
-                if with_counts:
-                    top = max(with_counts, key=lambda e: e.comments)
+                news = [e for e in with_counts if "|OT" not in e.title and "Thread" not in e.title]
+                if news:
+                    top = max(news, key=lambda e: e.comments)
                     if best_thread is None or top.comments > best_thread[1]:
                         best_thread = (top.link, top.comments, top.title)
 
@@ -127,6 +141,9 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
             if page:
                 threads = parse_thread_list(page.text(), ERA)
                 counted = [t for t in threads if t.replies is not None]
+                if not counted and not suffix:
+                    _dump(f"{name} listing", page.text(), "structItem--thread")
+                    _dump(f"{name} listing", page.text(), "/threads/", 1500)
                 rep.result(f"resetera:{name}:{label}", OK if counted else WARN,
                            f"{label}: {len(threads)} threads parsed, {len(counted)} with reply counts; top: "
                            + "; ".join(f"{t.replies} {t.title[:40]}" for t in threads[:3]))
@@ -150,6 +167,9 @@ def probe_resetera(f: Fetcher, rep: Report, forum_names: list[str]):
         return
     page1 = parse_thread_page(p1.text())
     reacted = [p for p in page1.posts if p.reactions]
+    if not reacted:
+        _dump("thread page", p1.text(), "reaction", 3000)
+        _dump("thread page", p1.text(), "<article", 1500)
     rep.result("resetera:thread:page1", OK if page1.posts else FAIL,
                f"page 1: {len(page1.posts)} posts parsed, {len(reacted)} with reaction counts, "
                f"last page = {page1.last_page}")

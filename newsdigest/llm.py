@@ -139,6 +139,7 @@ class LLM:
         self.summary_model = cfg.get("summary_model", "claude-sonnet-5-5")
         self.summary_effort = cfg.get("summary_effort", "medium")
         self.batch_size = int(cfg.get("scoring_batch_size", 25))
+        self.use_fallbacks = True
 
     # -- helpers -------------------------------------------------------------
 
@@ -147,7 +148,10 @@ class LLM:
         if response.stop_reason == "refusal":
             raise RuntimeError("model declined the request")
         text = next(b.text for b in response.content if b.type == "text")
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return json.loads(text[text.index("{"): text.rindex("}") + 1])
 
     def _haiku(self, system: str, user: str, schema: dict, max_tokens: int = 4000) -> dict:
         response = self.client.messages.create(
@@ -160,17 +164,23 @@ class LLM:
         return self._json(response)
 
     def _sonnet(self, system: str, user: str, schema: dict) -> dict:
-        response = self.client.beta.messages.create(
+        kwargs = dict(
             model=self.summary_model,
             max_tokens=8000,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_config={"effort": self.summary_effort, "format": {"type": "json_schema", "schema": schema}},
-            # If the summary model declines, Anthropic re-runs the request on a recommended fallback model.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
         )
-        return self._json(response)
+        if self.use_fallbacks:
+            try:
+                # If the summary model declines, Anthropic re-runs the request on a recommended fallback model.
+                response = self.client.beta.messages.create(
+                    **kwargs, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+                return self._json(response)
+            except anthropic.BadRequestError as e:
+                log.warning("server-side fallback not accepted (%s); continuing without it", e.message)
+                self.use_fallbacks = False
+        return self._json(self.client.messages.create(**kwargs))
 
     # -- scoring -------------------------------------------------------------
 
@@ -178,7 +188,9 @@ class LLM:
         """Sets item.relevance (0-10) and item.relevance_reason in place."""
         system = SCORE_SYSTEM[kind].format(interests=interests) + "\n" + UNTRUSTED + \
             "\nReturn one entry per item id with an integer score and a one-line reason (max 15 words)."
+        failures, batches = [], 0
         for start in range(0, len(items), self.batch_size):
+            batches += 1
             batch = items[start:start + self.batch_size]
             lines = []
             for n, it in enumerate(batch):
@@ -190,11 +202,15 @@ class LLM:
                 data = self._haiku(system, "<items>\n" + "\n".join(lines) + "\n</items>", SCORE_SCHEMA)
             except Exception as e:  # noqa: BLE001 - an unscored batch is dropped, not fatal
                 log.warning("scoring batch failed (%s); dropping %d items", e, len(batch))
+                failures.append(e)
                 continue
             for s in data["scores"]:
                 if 0 <= s["id"] < len(batch):
                     batch[s["id"]].relevance = max(0, min(10, s["score"]))
                     batch[s["id"]].relevance_reason = s["reason"]
+        if batches and len(failures) == batches:
+            # Every call failed: that's a setup problem (key, credit, model), not a quiet news day.
+            raise RuntimeError(f"relevance scoring failed for every batch: {failures[0]}") from failures[0]
 
     # -- clustering ----------------------------------------------------------
 

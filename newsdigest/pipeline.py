@@ -52,7 +52,7 @@ def _select(pairs: list[tuple[Item, Source]], llm: LLM, interests: str, kind: st
 
 
 def _summarize(stories: list[Story], sources: dict[str, Source], summarize) -> list[Story]:
-    out = []
+    out, errors = [], []
     for story in stories:
         for it in story.items:
             if it.source_id in sources:
@@ -61,8 +61,11 @@ def _summarize(stories: list[Story], sources: dict[str, Source], summarize) -> l
             story.summary = summarize(story)
         except Exception as e:  # noqa: BLE001 - one failed summary drops one story, not the digest
             log.warning("summary failed for %r: %s", story.primary.title, e)
+            errors.append(e)
             continue
         out.append(story)
+    if stories and not out:
+        raise RuntimeError(f"every summary failed: {errors[0]}") from errors[0]
     return out
 
 
